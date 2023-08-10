@@ -3,7 +3,7 @@ package onvif
 import (
 	"encoding/xml"
 	"errors"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/url"
 	"reflect"
@@ -93,13 +93,13 @@ func (dev *Device) GetServices() map[string]string {
 	return dev.endpoints
 }
 
-// GetServices return available endpoints
+// GetDeviceInfo GetServices return available endpoints
 func (dev *Device) GetDeviceInfo() DeviceInfo {
 	return dev.info
 }
 
 func readResponse(resp *http.Response) string {
-	b, err := ioutil.ReadAll(resp.Body)
+	b, err := io.ReadAll(resp.Body)
 	if err != nil {
 		panic(err)
 	}
@@ -124,13 +124,17 @@ func GetAvailableDevicesAtSpecificEthernetInterface(interfaceName string) ([]Dev
 		}
 
 		for _, xaddr := range doc.Root().FindElements("./Body/ProbeMatches/ProbeMatch/XAddrs") {
-			xaddr := strings.Split(strings.Split(xaddr.Text(), " ")[0], "/")[2]
-			if !nvtDevicesSeen[xaddr] {
-				dev, err := NewDevice(DeviceParams{Xaddr: strings.Split(xaddr, " ")[0]})
+			xaddr1 := strings.Split(strings.Split(xaddr.Text(), " ")[0], "/")
+			if len(xaddr1) < 3 {
+				continue
+			}
+			xaddr2 := xaddr1[2]
+			if !nvtDevicesSeen[xaddr2] {
+				dev, err := NewDevice(DeviceParams{Xaddr: strings.Split(xaddr2, " ")[0]})
 				if err != nil {
 					// TODO(jfsmig) print a warning
 				} else {
-					nvtDevicesSeen[xaddr] = true
+					nvtDevicesSeen[xaddr2] = true
 					nvtDevices = append(nvtDevices, *dev)
 				}
 			}
@@ -143,7 +147,7 @@ func GetAvailableDevicesAtSpecificEthernetInterface(interfaceName string) ([]Dev
 func (dev *Device) getSupportedServices(resp *http.Response) error {
 	doc := etree.NewDocument()
 
-	data, err := ioutil.ReadAll(resp.Body)
+	data, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return err
 	}
@@ -160,8 +164,8 @@ func (dev *Device) getSupportedServices(resp *http.Response) error {
 		dev.addEndpoint(j.Parent().Tag, j.Text())
 	}
 
-	extension_services := doc.FindElements("./Envelope/Body/GetCapabilitiesResponse/Capabilities/Extension/*/XAddr")
-	for _, j := range extension_services {
+	extensionServices := doc.FindElements("./Envelope/Body/GetCapabilitiesResponse/Capabilities/Extension/*/XAddr")
+	for _, j := range extensionServices {
 		dev.addEndpoint(j.Parent().Tag, j.Text())
 	}
 
@@ -214,7 +218,7 @@ func (dev *Device) GetEndpoint(name string) string {
 	return dev.endpoints[name]
 }
 
-func (dev Device) buildMethodSOAP(msg string) (gosoap.SoapMessage, error) {
+func (dev *Device) buildMethodSOAP(msg string) (gosoap.SoapMessage, error) {
 	doc := etree.NewDocument()
 	if err := doc.ReadFromString(msg); err != nil {
 		//log.Println("Got error")
@@ -230,7 +234,7 @@ func (dev Device) buildMethodSOAP(msg string) (gosoap.SoapMessage, error) {
 }
 
 // getEndpoint functions get the target service endpoint in a better way
-func (dev Device) getEndpoint(endpoint string) (string, error) {
+func (dev *Device) getEndpoint(endpoint string) (string, error) {
 
 	// common condition, endpointMark in map we use this.
 	if endpointURL, bFound := dev.endpoints[endpoint]; bFound {
@@ -250,9 +254,9 @@ func (dev Device) getEndpoint(endpoint string) (string, error) {
 	return endpointURL, errors.New("target endpoint service not found")
 }
 
-// CallMethod functions call an method, defined <method> struct.
+// CallMethod functions call a method, defined <method> struct.
 // You should use Authenticate method to call authorized requests.
-func (dev Device) CallMethod(method interface{}) (*http.Response, error) {
+func (dev *Device) CallMethod(method interface{}) (*http.Response, error) {
 	pkgPath := strings.Split(reflect.TypeOf(method).PkgPath(), "/")
 	pkg := strings.ToLower(pkgPath[len(pkgPath)-1])
 
@@ -263,8 +267,8 @@ func (dev Device) CallMethod(method interface{}) (*http.Response, error) {
 	return dev.callMethodDo(endpoint, method)
 }
 
-// CallMethod functions call an method, defined <method> struct with authentication data
-func (dev Device) callMethodDo(endpoint string, method interface{}) (*http.Response, error) {
+// CallMethod functions call a method, defined <method> struct with authentication data
+func (dev *Device) callMethodDo(endpoint string, method interface{}) (*http.Response, error) {
 	output, err := xml.MarshalIndent(method, "  ", "    ")
 	if err != nil {
 		return nil, err
